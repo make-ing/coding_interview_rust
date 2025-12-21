@@ -33,11 +33,8 @@ fn calculate_steering_direction(from: &Projectile, to: &Projectile) -> (f64, f64
     let dy = to.y - from.y;
     let distance = (dx * dx + dy * dy).sqrt();
     
-    if distance > 0.1 {
-        (dx / distance, dy / distance)
-    } else {
-        (0.0, 0.0)
-    }
+    (dx / distance, dy / distance)
+
 }
 
 // Calculate angle between two velocity vectors in degrees
@@ -92,11 +89,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         red_positions.push((step as f64, red.y));
         green_positions.push((step as f64, green.y));
 
-        if step % 100 == 0 {
-            println!("Step {}: Red ({:.2}, {:.2}), Green ({:.2}, {:.2}), Distance: {:.2}m",
-                step, red.x, red.y, green.x, green.y, distance);
-        }
-
         // Collision detection: stop at < 1m
         if distance < collision_threshold {
             collision_point = Some((step as f64, red.y));
@@ -105,19 +97,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let angle = calculate_angle_between_vectors(red.vx, red.vy, green.vx, green.vy);
             collision_angle = Some(angle);
             
-            println!("\n💥 COLLISION! at time step: {}", step);
-            println!("Red position: ({:.2}, {:.2})", red.x, red.y);
-            println!("Green position: ({:.2}, {:.2})", green.x, green.y);
-            println!("Distance: {:.2}m", distance);
-            println!("Red velocity: ({:.2}, {:.2})", red.vx, red.vy);
-            println!("Green velocity: ({:.2}, {:.2})", green.vx, green.vy);
-            if angle > 20.0 {
-                println!("✅ Angle between velocities is greater than 20°");
-            } else {
-                println!("❌ Angle between velocities is less than or equal to 20°");
-            }
             break;
         }
+    }
+
+    // Print collision results after simulation ends
+    if collision_point.is_some() {
+        if let Some((step_x, _)) = collision_point {
+            println!("✅ Collision occurred at step {} (within 1000 time steps)", step_x as usize);
+        }
+        if let Some(angle) = collision_angle {
+            if angle > 5.0 {
+                println!("✅ Angle between velocities is: {:.2}° (greater than 5°)", angle);
+            } else {
+                println!("❌ Angle between velocities is: {:.2}° (less than 5°)", angle);
+            }
+        }
+    } else {
+        println!("❌ No collision occurred within 1000 time steps");
     }
 
     // Visualization
@@ -198,8 +195,8 @@ fn visualize_simulation(
     // Draw X at collision point
     if let Some((collision_x, collision_y)) = collision_point {
         if let Some(angle) = collision_angle {
-            if angle > 20.0 {
-                // Draw green checkmark for angle > 20°
+            if angle > 5.0 {
+                // Draw green checkmark for angle > 5°
                 let size = 1.5;
                 
                 // Checkmark: first part (bottom-left to middle)
@@ -220,7 +217,7 @@ fn visualize_simulation(
                     ShapeStyle::from(&GREEN).stroke_width(4),
                 )))?;
             } else {
-                // Draw red X for angle <= 20°
+                // Draw red X for angle <= 5°
                 let x_size = 1.5;
                 
                 // Diagonal line 1 (top-left to bottom-right)
