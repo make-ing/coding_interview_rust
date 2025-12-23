@@ -10,11 +10,12 @@ A Rust-based simulation of two projectiles where one pursues the other until the
 ## Projectile Parameters
 
 ### Red Projectile (Target)
-- **Initial Position**: (0.0, 20.0)
+- **Initial Position**: (0.0, 30.0)
 - **Initial Velocity**: (2.0, 0.0) m/s
-- **Flight Height**: 20.0 meters (constant horizontal flight)
-- **Movement**: Moves horizontally along a straight line
+- **Flight Height**: 30.0 meters (constant horizontal flight with random evasion)
+- **Movement**: Moves horizontally with random angular deviation (-5° to +5°) and P-controller correction
 - **Speed**: 2.0 m/s
+- **Target Height Correction**: P-gain of 0.2 with 60% correction weight
 
 ### Green Projectile (Pursuer)
 - **Initial Position**: (0.0, 0.0)
@@ -27,6 +28,12 @@ A Rust-based simulation of two projectiles where one pursues the other until the
 
 - **Collision Threshold**: < 1.0 meter distance
 - **Time Steps**: Up to 1000 steps
+- **Interceptor Speed**: 2.5 m/s (constant)
+- **Target Evasion**:
+  - Random angle deviation: -5° to +5°
+  - P-Controller gain: 0.2
+  - Correction weight: 0.6 (60% correction, 40% random)
+  - Target height maintenance: 30.0 meters
 - **Angle Threshold**: Collision result indicator
   - **Green Checkmark**: Angle > 5°
   - **Red X**: Angle ≤ 5°
@@ -35,12 +42,6 @@ A Rust-based simulation of two projectiles where one pursues the other until the
 
 ### Objective
 Modify the `calculate_steering_direction()` function to achieve a collision with an angle **greater than 5 degrees**.
-
-### Requirements
-- Change only the steering algorithm within `calculate_steering_direction()`
-- Keep the function signature unchanged: `fn calculate_steering_direction(from: &Projectile, to: &Projectile) -> (f64, f64)`
-- The function must return a unit direction vector (normalized)
-- Must work with the constant pursuer speed of 2.5 m/s
 
 ### Testing
 Run the simulation with:
