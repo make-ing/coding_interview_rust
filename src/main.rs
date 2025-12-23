@@ -1,16 +1,17 @@
 use plotters::prelude::*;
+use rand::Rng;
 
 #[derive(Debug, Clone, Copy)]
-struct Projectile {
+pub struct Target {
     x: f64,
     y: f64,
     vx: f64,
     vy: f64,
 }
 
-impl Projectile {
+impl Target {
     fn new(x: f64, y: f64, vx: f64, vy: f64) -> Self {
-        Projectile { x, y, vx, vy }
+        Target { x, y, vx, vy }
     }
 
     fn update(&mut self) {
@@ -19,7 +20,7 @@ impl Projectile {
         self.y += self.vy;
     }
 
-    fn distance_to(&self, other: &Projectile) -> f64 {
+    fn distance_to(&self, other: &Target) -> f64 {
         // Calculate distance to another projectile
         let dx = self.x - other.x;
         let dy = self.y - other.y;
@@ -27,8 +28,10 @@ impl Projectile {
     }
 }
 
+pub type Interceptor = Target;
+
 // Calculate steering direction towards target (unit vector)
-fn calculate_steering_direction(from: &Projectile, to: &Projectile) -> (f64, f64) {
+fn calculate_steering_direction(from: &Interceptor, to: &Target) -> (f64, f64) {
     let dx = to.x - from.x;
     let dy = to.y - from.y;
     let distance = (dx * dx + dy * dy).sqrt();
@@ -54,22 +57,61 @@ fn calculate_angle_between_vectors(vx1: f64, vy1: f64, vx2: f64, vy2: f64) -> f6
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize projectiles
-    let mut red = Projectile::new(0.0, 20.0, 2.0, 0.0); // Red: 20m height, horizontal
-    let mut green = Projectile::new(0.0, 0.0, 0.0, 0.0); // Green: at ground level
-    let green_speed = 2.5; // Speed of green projectile
+    let mut target = Target::new(0.0, 30.0, 2.0, 0.0); // Red/Target: 30m height, horizontal
+    let mut interceptor = Interceptor::new(0.0, 0.0, 0.0, 0.0); // Green/Interceptor: at ground level
+    let interceptor_speed = 2.5; // Speed of interceptor projectile
+    let mut rng = rand::thread_rng();
 
-    let mut red_positions = vec![];
-    let mut green_positions = vec![];
+    let mut target_positions = vec![];
+    let mut interceptor_positions = vec![];
     let mut collision_point: Option<(f64, f64)> = None;
     let mut collision_angle: Option<f64> = None;
 
     let collision_threshold = 1.0; // Stop at < 1m distance
+    
+    let target_initial_height = 30.0; // Initial/target height for correction
+    let correction_weight = 0.6; // Weight of correction (0.0 = pure random, 1.0 = pure correction)
+    let p_gain = 0.2; // P-Regler Verstärkung (Proportional gain)
 
     // Simulation for 1000 time steps
-    for step in 0..1000 {
-        // Green projectile steers directly towards red
-        let distance = green.distance_to(&red);
-        let (mut dir_x, mut dir_y) = calculate_steering_direction(&green, &red);
+    for _step in 0..1000 {
+        // Collision detection before update: check if we're already close
+        let distance = interceptor.distance_to(&target);
+        
+        if distance < collision_threshold {
+            collision_point = Some((target.x, target.y));
+            
+            // Calculate angle between velocity vectors
+            let angle = calculate_angle_between_vectors(target.vx, target.vy, interceptor.vx, interceptor.vy);
+            collision_angle = Some(angle);
+            
+            break;
+        }
+        
+        // Add random deviation to target's velocity between -5° and +5°
+        let random_angle_deg: f64 = rng.gen_range(-5.0..5.0);
+        
+        // P-Regler: Correction angle proportional to height error
+        let height_error = target.y - target_initial_height;
+        let correction_angle_deg = -height_error * p_gain; // Negative because we want to correct upward when below target
+        
+        // Blend random angle and correction angle based on weight
+        let blended_angle_deg = (random_angle_deg * (1.0 - correction_weight)) 
+                                + (correction_angle_deg * correction_weight);
+        
+        let random_angle_rad = blended_angle_deg.to_radians();
+        
+        // Rotate the target's velocity vector by the random angle
+        let cos_angle = random_angle_rad.cos();
+        let sin_angle = random_angle_rad.sin();
+        let rotated_vx = target.vx * cos_angle - target.vy * sin_angle;
+        let rotated_vy = target.vx * sin_angle + target.vy * cos_angle;
+        
+        target.vx = rotated_vx;
+        target.vy = rotated_vy;
+        
+        // Interceptor steers directly towards target
+        let (mut dir_x, mut dir_y) = calculate_steering_direction(&interceptor, &target);
         
         // Normalize direction vector
         let dir_magnitude = (dir_x * dir_x + dir_y * dir_y).sqrt();
@@ -78,33 +120,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dir_y /= dir_magnitude;
         }
         
-        green.vx = dir_x * green_speed;
-        green.vy = dir_y * green_speed;
+        interceptor.vx = dir_x * interceptor_speed;
+        interceptor.vy = dir_y * interceptor_speed;
 
         // Update positions
-        red.update();
-        green.update();
+        target.update();
+        interceptor.update();
 
-        // Store positions
-        red_positions.push((step as f64, red.y));
-        green_positions.push((step as f64, green.y));
-
-        // Collision detection: stop at < 1m
-        if distance < collision_threshold {
-            collision_point = Some((step as f64, red.y));
-            
-            // Calculate angle between velocity vectors
-            let angle = calculate_angle_between_vectors(red.vx, red.vy, green.vx, green.vy);
-            collision_angle = Some(angle);
-            
-            break;
-        }
+        // Store positions (both X and Y coordinates)
+        target_positions.push((target.x, target.y));
+        interceptor_positions.push((interceptor.x, interceptor.y));
+        
     }
 
     // Print collision results after simulation ends
     if collision_point.is_some() {
         if let Some((step_x, _)) = collision_point {
-            println!("✅ Collision occurred at step {} (within 1000 time steps)", step_x as usize);
+            println!("✅ Collision occurred at step {}", step_x as usize);
         }
         if let Some(angle) = collision_angle {
             if angle > 5.0 {
@@ -118,128 +150,90 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Visualization
-    visualize_simulation(&red_positions, &green_positions, collision_point, collision_angle)?;
+    visualize_simulation(&target_positions, &interceptor_positions)?;
 
     Ok(())
 }
 
 
 
-
-
-
 fn visualize_simulation(
-    red_positions: &[(f64, f64)],
-    green_positions: &[(f64, f64)],
-    collision_point: Option<(f64, f64)>,
-    collision_angle: Option<f64>,
+    target_positions: &[(f64, f64)],
+    interceptor_positions: &[(f64, f64)],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let root = BitMapBackend::new("collision_simulation.png", (1400, 900)).into_drawing_area();
     root.fill(&WHITE)?;
 
-    let max_time = red_positions.len() as f64;
-    let max_y = 30.0;
+    // Calculate dynamic boundaries based on data
+    let max_x = target_positions
+        .iter()
+        .chain(interceptor_positions.iter())
+        .map(|(x, _)| *x)
+        .fold(0.0, f64::max)
+        .max(10.0) * 1.1; // Add 10% padding
+
+    let max_y = target_positions
+        .iter()
+        .chain(interceptor_positions.iter())
+        .map(|(_, y)| *y)
+        .fold(0.0, f64::max)
+        .max(10.0) * 1.1; // Add 10% padding
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Projectile Collision Simulation (Stop at <1m distance)", ("sans-serif", 30))
+        .caption("Target vs Interceptor Simulation (Stop at <1m distance)", ("sans-serif", 30))
         .margin(15)
         .x_label_area_size(40)
         .y_label_area_size(50)
-        .right_y_label_area_size(50)
         .build_cartesian_2d(
-            0f64..max_time,
+            0f64..max_x,
             0f64..max_y,
-        )?
-        .set_secondary_coord(0f64..max_time, 0f64..max_y);
+        )?;
 
-    // Draw red projectile line
+    // Draw target line
     chart
         .draw_series(LineSeries::new(
-            red_positions.iter().copied(),
+            target_positions.iter().copied(),
             ShapeStyle::from(&RED).stroke_width(2),
         ))?
-        .label("Red Projectile (20m altitude)");
+        .label("Target (random evasion)");
 
-    // Draw green projectile line
+    // Draw interceptor line
     chart
         .draw_series(LineSeries::new(
-            green_positions.iter().copied(),
+            interceptor_positions.iter().copied(),
             ShapeStyle::from(&GREEN).stroke_width(2),
         ))?
-        .label("Green Projectile (pursuing)");
+        .label("Interceptor (pursuing)");
 
-    // Draw points and arrows for each simulation step for red projectile
-    for window in red_positions.windows(2) {
-        let (x1, y1) = window[0];
-        
-        // Draw point at current position
+    // Draw points for target
+    for pos in target_positions.iter() {
         chart.draw_series(std::iter::once(Circle::new(
-            (x1, y1),
+            *pos,
             3,
             ShapeStyle::from(&RED).filled(),
         )))?;
     }
 
-    // Draw points and arrows for each simulation step for green projectile
-    for window in green_positions.windows(2) {
-        let (x1, y1) = window[0];
-        
-        // Draw point at current position
+    // Draw points for interceptor
+    for pos in interceptor_positions.iter() {
         chart.draw_series(std::iter::once(Circle::new(
-            (x1, y1),
+            *pos,
             3,
             ShapeStyle::from(&GREEN).filled(),
         )))?;
     }
 
-    // Draw X at collision point
-    if let Some((collision_x, collision_y)) = collision_point {
-        if let Some(angle) = collision_angle {
-            if angle > 5.0 {
-                // Draw green checkmark for angle > 5°
-                let size = 1.5;
-                
-                // Checkmark: first part (bottom-left to middle)
-                chart.draw_series(std::iter::once(PathElement::new(
-                    vec![
-                        (collision_x - size * 0.5, collision_y),
-                        (collision_x - size * 0.2, collision_y + size * 0.3),
-                    ],
-                    ShapeStyle::from(&GREEN).stroke_width(4),
-                )))?;
-                
-                // Checkmark: second part (middle to top-right)
-                chart.draw_series(std::iter::once(PathElement::new(
-                    vec![
-                        (collision_x - size * 0.2, collision_y + size * 0.3),
-                        (collision_x + size * 0.7, collision_y - size * 0.5),
-                    ],
-                    ShapeStyle::from(&GREEN).stroke_width(4),
-                )))?;
-            } else {
-                // Draw red X for angle <= 5°
-                let x_size = 1.5;
-                
-                // Diagonal line 1 (top-left to bottom-right)
-                chart.draw_series(std::iter::once(PathElement::new(
-                    vec![
-                        (collision_x - x_size, collision_y - x_size),
-                        (collision_x + x_size, collision_y + x_size),
-                    ],
-                    ShapeStyle::from(&RED).stroke_width(4),
-                )))?;
-                
-                // Diagonal line 2 (top-right to bottom-left)
-                chart.draw_series(std::iter::once(PathElement::new(
-                    vec![
-                        (collision_x + x_size, collision_y - x_size),
-                        (collision_x - x_size, collision_y + x_size),
-                    ],
-                    ShapeStyle::from(&RED).stroke_width(4),
-                )))?;
-            }
-        }
+    // Draw blue circle at the last position of interceptor
+    if let Some(&last_interceptor_pos) = interceptor_positions.last() {
+        let (collision_x, collision_y) = last_interceptor_pos;
+        
+        chart.draw_series(std::iter::once(Circle::new(
+            (collision_x, collision_y),
+            25,
+            ShapeStyle::from(&BLUE).stroke_width(3),
+        )))?;
     }
+
 
     // Configure axes
     chart
@@ -247,12 +241,7 @@ fn visualize_simulation(
         .x_label_style(("sans-serif", 15))
         .y_label_style(("sans-serif", 15))
         .y_desc("Height (m)")
-        .x_desc("Time step")
-        .draw()?;
-
-    chart
-        .configure_secondary_axes()
-        .y_desc("Height (m)")
+        .x_desc("Distance (m)")
         .draw()?;
 
     root.present()?;
