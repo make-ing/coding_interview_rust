@@ -30,14 +30,91 @@ impl Target {
 
 pub type Interceptor = Target;
 
-// Calculate steering direction towards target (unit vector)
+// Calculate steering direction towards target (unit vector).
+// Uses a simple lead-pursuit intercept calculation to aim where the target
+// will be, and if the resulting approach angle relative to the target's
+// velocity is <= 5°, it nudges the heading to ensure a >5° approach.
 fn calculate_steering_direction(from: &Interceptor, to: &Target) -> (f64, f64) {
-    let dx = to.x - from.x;
-    let dy = to.y - from.y;
-    let distance = (dx * dx + dy * dy).sqrt();
-    
-    (dx / distance, dy / distance)
+    // Relative position
+    let rx = to.x - from.x;
+    let ry = to.y - from.y;
 
+    // Target velocity
+    let vx = to.vx;
+    let vy = to.vy;
+
+    // Interceptor speed taken from its current velocity magnitude
+    let interceptor_speed = (from.vx * from.vx + from.vy * from.vy).sqrt();
+
+    // Solve quadratic: (v·v - s^2) t^2 + 2(r·v) t + r·r = 0
+    let a = vx * vx + vy * vy - interceptor_speed * interceptor_speed;
+    let b = 2.0 * (rx * vx + ry * vy);
+    let c = rx * rx + ry * ry;
+
+    let mut t_opt: Option<f64> = None;
+
+    if a.abs() < 1e-9 {
+        // Degenerate to linear: b t + c = 0 => t = -c / b
+        if b.abs() > 1e-9 {
+            let t = -c / b;
+            if t > 0.0 {
+                t_opt = Some(t);
+            }
+        }
+    } else {
+        let disc = b * b - 4.0 * a * c;
+        if disc >= 0.0 {
+            let sqrt = disc.sqrt();
+            let t1 = (-b + sqrt) / (2.0 * a);
+            let t2 = (-b - sqrt) / (2.0 * a);
+            let mut candidates = vec![];
+            if t1 > 0.0 { candidates.push(t1); }
+            if t2 > 0.0 { candidates.push(t2); }
+            if !candidates.is_empty() {
+                candidates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                t_opt = Some(candidates[0]);
+            }
+        }
+    }
+
+    // Determine aim point: predicted intercept if possible, otherwise current target
+    let (aim_x, aim_y) = if let Some(t) = t_opt {
+        (to.x + vx * t, to.y + vy * t)
+    } else {
+        (to.x, to.y)
+    };
+
+    // Desired direction to aim point
+    let mut dx = aim_x - from.x;
+    let mut dy = aim_y - from.y;
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist > 1e-9 {
+        dx /= dist;
+        dy /= dist;
+    } else {
+        return (0.0, 0.0);
+    }
+
+    // Ensure approach angle relative to target velocity is > 5°
+    let angle = calculate_angle_between_vectors(dx, dy, vx, vy);
+    if angle <= 5.0 {
+        // Determine rotation direction via cross product sign
+        let cross = dx * vy - dy * vx;
+        let sign = if cross >= 0.0 { 1.0 } else { -1.0 };
+        let min_deg = 5.5_f64; // small buffer above 5°
+        let rot = sign * min_deg.to_radians();
+        let cos = rot.cos();
+        let sin = rot.sin();
+        let ndx = dx * cos - dy * sin;
+        let ndy = dx * sin + dy * cos;
+        let nm = (ndx * ndx + ndy * ndy).sqrt();
+        if nm > 1e-9 {
+            dx = ndx / nm;
+            dy = ndy / nm;
+        }
+    }
+
+    (dx, dy)
 }
 
 // Calculate angle between two velocity vectors in degrees
@@ -70,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let collision_threshold = 1.0; // Stop at < 1m distance
     
     let target_initial_height = 30.0; // Initial/target height for correction
-    let correction_weight = 0.6; // Weight of correction (0.0 = pure random, 1.0 = pure correction)
+    let correction_weight = 0.0; // Weight of correction (0.0 = pure random, 1.0 = pure correction)
     let p_gain = 0.2; // P-Regler Verstärkung (Proportional gain)
 
     // Simulation for 1000 time steps
@@ -110,7 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         target.vx = rotated_vx;
         target.vy = rotated_vy;
         
-        // Interceptor steers directly towards target
+        // Interceptor using lead-pursuit to calculate steering direction
         let (mut dir_x, mut dir_y) = calculate_steering_direction(&interceptor, &target);
         
         // Normalize direction vector
