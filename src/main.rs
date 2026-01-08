@@ -35,6 +35,23 @@ pub type Interceptor = Target;
 // will be, and if the resulting approach angle relative to the target's
 // velocity is <= 5°, it nudges the heading to ensure a >5° approach.
 fn calculate_steering_direction(from: &Interceptor, to: &Target) -> (f64, f64) {
+    // --- Derivation / algorithm notes ---
+    // We want to compute a heading (unit vector) so the interceptor will meet
+    // the target. Let r = to - from be the relative position, v the target
+    // velocity, and s the interceptor speed (magnitude of from.v).
+    // The intercept condition is: ||r + v * t|| = s * t for some t > 0.
+    // Squaring both sides gives a quadratic in t:
+    //   (v·v - s^2) t^2 + 2 (r·v) t + (r·r) = 0
+    // Solve this quadratic for positive roots and choose the smallest
+    // positive root (earliest intercept). If no positive root exists
+    // (discriminant < 0 or no positive roots), fall back to aiming at the
+    // target's current position.
+    // Once an intercept time t is chosen, the aim point is to + v * t and the
+    // desired heading is (aim - from) normalized. Finally, we compute the
+    // angle between the heading and the target velocity; if it is <= 5° we
+    // rotate the heading by a small buffer (~5.5°) away from parallel to
+    // enforce an approach angle greater than 5° (sign chosen by 2D cross).
+
     // Relative position
     let rx = to.x - from.x;
     let ry = to.y - from.y;
