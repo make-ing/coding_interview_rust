@@ -77,3 +77,13 @@ cargo run
 ```
 
 The graph will be saved as `collision_simulation.png` in the project directory.
+
+
+## Additional requirements
+
+From a Ubunutu 24.04 run the following commands to install the necessary packages:
+
+```bash
+sudo apt update
+sudo apt install build-essential pkg-config libfontconfig-dev
+```
