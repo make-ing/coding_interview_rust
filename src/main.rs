@@ -152,9 +152,25 @@ fn calculate_angle_between_vectors(vx1: f64, vy1: f64, vx2: f64, vy2: f64) -> f6
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize projectiles
     let mut target = Target::new(0.0, 30.0, 2.0, 0.0); // Red/Target: 30m height, horizontal
-    let mut interceptor = Interceptor::new(0.0, 0.0, 0.0, 0.0); // Green/Interceptor: at ground level
     let interceptor_speed = 2.5; // Speed of interceptor projectile
     let mut rng = rand::thread_rng();
+
+    // CLI option: `--randomize-interceptor` or `-r` will randomize the
+    // interceptor's starting (x,y). Bounds chosen to keep positions non-negative
+    // so visualization axes remain sane.
+    let args: Vec<String> = std::env::args().collect();
+    let randomize_interceptor = args.iter().any(|a| a == "--randomize-interceptor" || a == "-r");
+
+    let (interceptor_start_x, interceptor_start_y) = if randomize_interceptor {
+        let x = rng.gen_range(0.0..50.0);
+        let y = rng.gen_range(0.0..20.0);
+        println!("🔀 Randomized interceptor start: ({:.2}, {:.2})", x, y);
+        (x, y)
+    } else {
+        (0.0, 0.0)
+    };
+
+    let mut interceptor = Interceptor::new(interceptor_start_x, interceptor_start_y, 0.0, 0.0); // Green/Interceptor
 
     let mut target_positions = vec![];
     let mut interceptor_positions = vec![];
