@@ -172,8 +172,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut interceptor = Interceptor::new(interceptor_start_x, interceptor_start_y, 0.0, 0.0); // Green/Interceptor
 
-    let mut target_positions = vec![];
-    let mut interceptor_positions = vec![];
+    let mut target_positions = vec![(target.x, target.y)];
+    let mut interceptor_positions = vec![(interceptor.x, interceptor.y)];
     let mut collision_point: Option<(f64, f64)> = None;
     let mut collision_angle: Option<f64> = None;
 
