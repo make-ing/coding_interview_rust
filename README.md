@@ -78,6 +78,19 @@ cargo run
 
 The graph will be saved as `collision_simulation.png` in the project directory.
 
+There are commandline options to modify the default behaviour of the simulation:
+
+--randomize-interceptor / -r: will randomize the interceptor start position
+
+--runs N / -n, --out-dir DIR / -o: will run N simulation and stores the results in the DIR directory
+
+Examples:
+```bash
+cargo run -- -r
+cargo run -- -n 10 -o test_dir_1
+cargo run -- -r -n 10 -o test_dir_1
+```
+
 
 ## Additional requirements
 
