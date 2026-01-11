@@ -1,5 +1,6 @@
 use plotters::prelude::*;
 use rand::Rng;
+use std::io::Write;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Target {
@@ -149,119 +150,162 @@ fn calculate_angle_between_vectors(vx1: f64, vy1: f64, vx2: f64, vy2: f64) -> f6
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize projectiles
-    let mut target = Target::new(0.0, 30.0, 2.0, 0.0); // Red/Target: 30m height, horizontal
-    let interceptor_speed = 2.5; // Speed of interceptor projectile
-    let mut rng = rand::thread_rng();
+struct SimulationResult {
+    target_positions: Vec<(f64, f64)>,
+    interceptor_positions: Vec<(f64, f64)>,
+    collision_point: Option<(f64, f64)>,
+    collision_angle: Option<f64>,
+}
 
-    // CLI option: `--randomize-interceptor` or `-r` will randomize the
-    // interceptor's starting (x,y). Bounds chosen to keep positions non-negative
-    // so visualization axes remain sane.
-    let args: Vec<String> = std::env::args().collect();
-    let randomize_interceptor = args.iter().any(|a| a == "--randomize-interceptor" || a == "-r");
-
-    let (interceptor_start_x, interceptor_start_y) = if randomize_interceptor {
-        let x = rng.gen_range(0.0..50.0);
-        let y = rng.gen_range(0.0..20.0);
-        println!("🔀 Randomized interceptor start: ({:.2}, {:.2})", x, y);
-        (x, y)
-    } else {
-        (0.0, 0.0)
-    };
-
-    let mut interceptor = Interceptor::new(interceptor_start_x, interceptor_start_y, interceptor_speed * 0.707, interceptor_speed * 0.707); // Green/Interceptor
+fn simulate_once(
+    rng: &mut impl Rng,
+    interceptor_start_x: f64,
+    interceptor_start_y: f64,
+    interceptor_speed: f64,
+    collision_threshold: f64,
+    target_initial_height: f64,
+    correction_weight: f64,
+    p_gain: f64,
+) -> SimulationResult {
+    let mut target = Target::new(0.0, 30.0, 2.0, 0.0);
+    let mut interceptor = Interceptor::new(
+        interceptor_start_x,
+        interceptor_start_y,
+        interceptor_speed * 0.707,
+        interceptor_speed * 0.707,
+    );
 
     let mut target_positions = vec![(target.x, target.y)];
     let mut interceptor_positions = vec![(interceptor.x, interceptor.y)];
     let mut collision_point: Option<(f64, f64)> = None;
     let mut collision_angle: Option<f64> = None;
 
-    let collision_threshold = 1.0; // Stop at < 1m distance
-    
-    let target_initial_height = 30.0; // Initial/target height for correction
-    let correction_weight = 0.0; // Weight of correction (0.0 = pure random, 1.0 = pure correction)
-    let p_gain = 0.2; // P-Regler Verstärkung (Proportional gain)
-
-    // Simulation for 1000 time steps
     for _step in 0..1000 {
-        // Collision detection before update: check if we're already close
         let distance = interceptor.distance_to(&target);
-        
         if distance < collision_threshold {
             collision_point = Some((target.x, target.y));
-            
-            // Calculate angle between velocity vectors
             let angle = calculate_angle_between_vectors(target.vx, target.vy, interceptor.vx, interceptor.vy);
             collision_angle = Some(angle);
-            
             break;
         }
-        
-        // Add random deviation to target's velocity between -5° and +5°
+
         let random_angle_deg: f64 = rng.gen_range(-5.0..5.0);
-        
-        // P-Regler: Correction angle proportional to height error
         let height_error = target.y - target_initial_height;
-        let correction_angle_deg = -height_error * p_gain; // Negative because we want to correct upward when below target
-        
-        // Blend random angle and correction angle based on weight
-        let blended_angle_deg = (random_angle_deg * (1.0 - correction_weight)) 
-                                + (correction_angle_deg * correction_weight);
-        
+        let correction_angle_deg = -height_error * p_gain;
+        let blended_angle_deg = (random_angle_deg * (1.0 - correction_weight)) + (correction_angle_deg * correction_weight);
         let random_angle_rad = blended_angle_deg.to_radians();
-        
-        // Rotate the target's velocity vector by the random angle
+
         let cos_angle = random_angle_rad.cos();
         let sin_angle = random_angle_rad.sin();
         let rotated_vx = target.vx * cos_angle - target.vy * sin_angle;
         let rotated_vy = target.vx * sin_angle + target.vy * cos_angle;
-        
         target.vx = rotated_vx;
         target.vy = rotated_vy;
-        
-        // Interceptor using lead-pursuit to calculate steering direction
+
         let (mut dir_x, mut dir_y) = calculate_steering_direction(&interceptor, &target);
-        
-        // Normalize direction vector
         let dir_magnitude = (dir_x * dir_x + dir_y * dir_y).sqrt();
         if dir_magnitude > 0.0 {
             dir_x /= dir_magnitude;
             dir_y /= dir_magnitude;
         }
-        
+
         interceptor.vx = dir_x * interceptor_speed;
         interceptor.vy = dir_y * interceptor_speed;
 
-        // Update positions
         target.update();
         interceptor.update();
 
-        // Store positions (both X and Y coordinates)
         target_positions.push((target.x, target.y));
         interceptor_positions.push((interceptor.x, interceptor.y));
-        
     }
 
-    // Print collision results after simulation ends
-    if collision_point.is_some() {
-        if let Some((step_x, _)) = collision_point {
-            println!("✅ Collision occurred at step {}", step_x as usize);
-        }
-        if let Some(angle) = collision_angle {
-            if angle > 5.0 {
-                println!("✅ Angle between velocities is: {:.2}° (greater than 5°)", angle);
-            } else {
-                println!("❌ Angle between velocities is: {:.2}° (less than 5°)", angle);
+    SimulationResult { target_positions, interceptor_positions, collision_point, collision_angle }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rng = rand::thread_rng();
+    // Basic parameters
+    let interceptor_speed = 2.5; // Speed of interceptor projectile
+    let collision_threshold = 1.0; // Stop at < 1m distance
+    let target_initial_height = 30.0; // Initial/target height for correction
+    let correction_weight = 0.0; // Weight of correction (0.0 = pure random, 1.0 = pure correction)
+    let p_gain = 0.2; // P-Regler Verstärkung (Proportional gain)
+
+    // Parse CLI args: --randomize-interceptor / -r, --runs N / -n, --out-dir DIR / -o
+    let args: Vec<String> = std::env::args().collect();
+    let randomize_interceptor = args.iter().any(|a| a == "--randomize-interceptor" || a == "-r");
+    let mut runs: usize = 1;
+    let mut out_dir = String::from(".");
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--runs" | "-n" => {
+                if i + 1 < args.len() {
+                    if let Ok(v) = args[i + 1].parse::<usize>() { runs = v; }
+                    i += 1;
+                }
             }
+            "--out-dir" | "-o" => {
+                if i + 1 < args.len() { out_dir = args[i + 1].clone(); i += 1; }
+            }
+            _ => {}
         }
-    } else {
-        println!("❌ No collision occurred within 1000 time steps");
+        i += 1;
     }
 
-    // Visualization
-    visualize_simulation(&target_positions, &interceptor_positions)?;
+    // Ensure output directory exists
+    std::fs::create_dir_all(&out_dir)?;
 
+    // Results CSV
+    let results_path = std::path::Path::new(&out_dir).join("results.csv");
+    let mut results_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&results_path)?;
+
+    // Write CSV header if file was just created and empty
+    if results_file.metadata()?.len() == 0 {
+        writeln!(results_file, "run,interceptor_start_x,interceptor_start_y,collided,collision_x,collision_y,angle_deg")?;
+    }
+
+    for run_idx in 1..=runs {
+        // Decide interceptor start
+        let (interceptor_start_x, interceptor_start_y) = if randomize_interceptor {
+            let x = rng.gen_range(0.0..50.0);
+            let y = rng.gen_range(0.0..20.0);
+            println!("🔀 Run {}: Randomized interceptor start: ({:.2}, {:.2})", run_idx, x, y);
+            (x, y)
+        } else {
+            (0.0, 0.0)
+        };
+
+        // Run simulation
+        let sim = simulate_once(
+            &mut rng,
+            interceptor_start_x,
+            interceptor_start_y,
+            interceptor_speed,
+            collision_threshold,
+            target_initial_height,
+            correction_weight,
+            p_gain,
+        );
+
+        // Save visualization per run
+        let out_png = std::path::Path::new(&out_dir)
+            .join(format!("collision_simulation_{:03}.png", run_idx));
+        visualize_simulation(&sim.target_positions, &sim.interceptor_positions, out_png.to_str().unwrap())?;
+
+        // Append result to CSV
+        if let Some((cx, cy)) = sim.collision_point {
+            let angle_str = sim.collision_angle.map(|a| format!("{:.2}", a)).unwrap_or_else(|| "".into());
+            writeln!(results_file, "{},{:.3},{:.3},true,{:.3},{:.3},{}", run_idx, interceptor_start_x, interceptor_start_y, cx, cy, angle_str)?;
+        } else {
+            writeln!(results_file, "{},{:.3},{:.3},false,,,", run_idx, interceptor_start_x, interceptor_start_y)?;
+        }
+    }
+
+    println!("✅ All runs complete. Results in: {}", out_dir);
     Ok(())
 }
 
@@ -270,8 +314,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn visualize_simulation(
     target_positions: &[(f64, f64)],
     interceptor_positions: &[(f64, f64)],
+    out_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let root = BitMapBackend::new("collision_simulation.png", (1400, 900)).into_drawing_area();
+    let root = BitMapBackend::new(out_path, (1400, 900)).into_drawing_area();
     root.fill(&WHITE)?;
 
     // Calculate dynamic boundaries based on data
@@ -355,7 +400,7 @@ fn visualize_simulation(
         .draw()?;
 
     root.present()?;
-    println!("✅ Graph saved as 'collision_simulation.png'");
+    println!("✅ Graph saved as '{}'", out_path);
 
     Ok(())
 }
