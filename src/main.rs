@@ -170,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (0.0, 0.0)
     };
 
-    let mut interceptor = Interceptor::new(interceptor_start_x, interceptor_start_y, 0.0, 0.0); // Green/Interceptor
+    let mut interceptor = Interceptor::new(interceptor_start_x, interceptor_start_y, interceptor_speed * 0.707, interceptor_speed * 0.707); // Green/Interceptor
 
     let mut target_positions = vec![(target.x, target.y)];
     let mut interceptor_positions = vec![(interceptor.x, interceptor.y)];
